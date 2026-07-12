@@ -100,6 +100,7 @@
   }
   #aipanel.open{display:block;}
   #aipanel h3{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);}
+  #aipanel a{color:var(--cyan);}
   #aipanel textarea{
     width:100%;background:var(--bg-soft);border:1px solid var(--line);border-radius:8px;color:var(--ink);
     padding:8px;font-family:inherit;font-size:13px;resize:vertical;min-height:60px;
@@ -158,13 +159,13 @@
 
 <div id="aipanel">
   <h3>AI Assist</h3>
-  <input id="aikey" type="password" placeholder="Your Anthropic API key (sk-ant-...)">
+  <input id="aikey" type="password" placeholder="Your free Gemini API key (AIza...)">
   <textarea id="aiprompt" placeholder="e.g. 'Launch plan for a podcast about ocean science' or leave blank to expand the selected node"></textarea>
   <div class="row">
     <button class="topbtn primary" id="btn-ai-generate">Generate map</button>
     <button class="topbtn" id="btn-ai-expand">Expand node</button>
   </div>
-  <div id="aihint">Key is stored only in this browser (localStorage), never sent anywhere but Anthropic's API directly from your device.</div>
+  <div id="aihint">Free key, no card needed — get one at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com</a>. Stored only in this browser, sent only to Google's API directly from your device.</div>
 </div>
 
 <div id="canvas-wrap">
@@ -564,30 +565,27 @@ document.getElementById('aikey').value = localStorage.getItem('synapse_ai_key') 
 document.getElementById('aikey').addEventListener('change', e=>{
   localStorage.setItem('synapse_ai_key', e.target.value.trim());
 });
+// Uses Google's free Gemini API (Gemini 3 Flash) — no card required, generous free daily quota.
+// Get a key at https://aistudio.google.com/app/apikey
 async function callClaude(prompt, system){
   const key = document.getElementById('aikey').value.trim();
-  if(!key){ toast('Add your Anthropic API key first'); return null; }
+  if(!key){ toast('Add your free Gemini API key first'); return null; }
   setSync('busy','Thinking…');
   try{
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(key)}`, {
       method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key': key,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
+      headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({
-        model:'claude-sonnet-4-6',
-        max_tokens: 1024,
-        system: system,
-        messages:[{role:'user', content: prompt}]
+        contents:[{ role:'user', parts:[{ text: prompt }] }],
+        systemInstruction:{ parts:[{ text: system }] },
+        generationConfig:{ maxOutputTokens: 1024, temperature: 0.8 }
       })
     });
     const data = await res.json();
     if(data.error){ toast('AI error: '+data.error.message); setSync('ok',''); return null; }
     setSync('ok','Synced');
-    return data.content.map(c=>c.text||'').join('');
+    const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+    return parts.map(p=>p.text||'').join('');
   }catch(e){ toast('AI request failed'); return null; }
 }
 function extractJSON(text){
@@ -633,7 +631,7 @@ document.getElementById('btn-help').onclick = ()=>{
     <span class="close" onclick="document.getElementById('modal-bg').classList.remove('open')">&times;</span>
     <h2>How Synapse works</h2>
     <p><b>Mapping:</b> Double-click a node to edit. Hover a node → click the ⊕ to add a child. Drag the canvas to pan, scroll to zoom, click a color swatch to recolor the selected node.</p>
-    <p><b>AI:</b> Open "AI Generate", paste your own Anthropic API key (stored only in this browser), describe a topic, and get a full branching map. Select any node and hit "Expand node" to grow it further.</p>
+    <p><b>AI:</b> Open "AI Generate", paste a free Gemini API key from aistudio.google.com (stored only in this browser), describe a topic, and get a full branching map. Select any node and hit "Expand node" to grow it further.</p>
     <p><b>Sync:</b> "Connect Google Drive" links your own free Drive storage (not a paid Anthropic/Synapse cloud) — the app can only touch the one file it creates, nothing else in your Drive. Every device that opens this same file and connects the same Google account will stay in sync.</p>
     <p><b>Offline:</b> Everything also saves to this browser automatically, so it still works without Drive connected — sync just catches up next time you're online.</p>
   `;
