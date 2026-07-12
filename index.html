@@ -304,6 +304,21 @@ function isVisible(id){
 function applyTransform(){
   worldEl.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`;
 }
+function centerView(){
+  // Nodes/edges are stored with a +4000px baseline offset so negative coordinates work;
+  // panning must subtract that back out or everything renders off-screen.
+  panX = window.innerWidth/2 - 4000*scale;
+  panY = (window.innerHeight-56)/2 + 56 - 4000*scale;
+  applyTransform();
+}
+function zoomTo(newScale, anchorX, anchorY){
+  newScale = Math.min(2.5, Math.max(0.25, newScale));
+  // Keep the point under (anchorX, anchorY) visually fixed while scale changes.
+  panX = anchorX - (anchorX - panX) * (newScale/scale);
+  panY = anchorY - (anchorY - panY) * (newScale/scale);
+  scale = newScale;
+  applyTransform();
+}
 
 /* ============ NODE INTERACTION ============ */
 function attachNodeEvents(div, n){
@@ -327,11 +342,38 @@ function attachNodeEvents(div, n){
     if(dragging && moved) saveLocal();
     dragging=false;
   });
+  // Touch equivalents so nodes can be dragged on phones/tablets, not just with a mouse.
+  div.addEventListener('touchstart', e=>{
+    e.stopPropagation();
+    selectedId = n.id; render();
+    if(div.isContentEditable) return;
+    const t = e.touches[0];
+    dragging = true; moved=false;
+    sx=t.clientX; sy=t.clientY; ox=n.x; oy=n.y;
+  }, {passive:true});
+  window.addEventListener('touchmove', e=>{
+    if(!dragging) return;
+    const t = e.touches[0];
+    moved=true;
+    n.x = ox + (t.clientX-sx)/scale;
+    n.y = oy + (t.clientY-sy)/scale;
+    render();
+  }, {passive:true});
+  window.addEventListener('touchend', ()=>{
+    if(dragging && moved) saveLocal();
+    dragging=false;
+  });
   div.addEventListener('dblclick', e=>{
     e.stopPropagation();
     div.contentEditable = true;
     div.focus();
-    document.execCommand('selectAll', false, null);
+    try{
+      const range = document.createRange();
+      range.selectNodeContents(div);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }catch(e){ /* selection pre-fill is a nicety, safe to skip if unsupported */ }
   });
   div.addEventListener('blur', ()=>{
     if(div.isContentEditable){
@@ -394,13 +436,59 @@ function deleteSelected(){
   wrapEl.addEventListener('wheel', e=>{
     e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    scale = Math.min(2.5, Math.max(0.25, scale*delta));
-    applyTransform();
+    zoomTo(scale*delta, e.clientX, e.clientY);
   }, {passive:false});
+
+  // Touch: one finger pans the canvas, two fingers pinch-zoom.
+  let pinchStartDist = 0, pinchStartScale = 1;
+  function touchDist(t0, t1){
+    return Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
+  }
+  wrapEl.addEventListener('touchstart', e=>{
+    if(e.touches.length === 1){
+      const t = e.touches[0];
+      if(t.target !== wrapEl && t.target.id !== 'world' && t.target.tagName!=='svg') return;
+      panning=true; sx=t.clientX; sy=t.clientY; ox=panX; oy=panY;
+      selectedId=null; render();
+    } else if(e.touches.length === 2){
+      panning=false;
+      pinchStartDist = touchDist(e.touches[0], e.touches[1]);
+      pinchStartScale = scale;
+    }
+  }, {passive:true});
+  wrapEl.addEventListener('touchmove', e=>{
+    if(e.touches.length === 1 && panning){
+      const t = e.touches[0];
+      panX = ox + (t.clientX-sx);
+      panY = oy + (t.clientY-sy);
+      applyTransform();
+    } else if(e.touches.length === 2){
+      const dist = touchDist(e.touches[0], e.touches[1]);
+      const midX = (e.touches[0].clientX + e.touches[1].clientX)/2;
+      const midY = (e.touches[0].clientY + e.touches[1].clientY)/2;
+      zoomTo(pinchStartScale * (dist/pinchStartDist), midX, midY);
+    }
+  }, {passive:true});
+  wrapEl.addEventListener('touchend', ()=>{ panning=false; });
 })();
-document.getElementById('btn-zoomin').onclick = ()=>{ scale=Math.min(2.5,scale*1.15); applyTransform(); };
-document.getElementById('btn-zoomout').onclick = ()=>{ scale=Math.max(0.25,scale*0.87); applyTransform(); };
-document.getElementById('btn-fit').onclick = ()=>{ scale=1; panX=window.innerWidth/2; panY=(window.innerHeight-56)/2+56; applyTransform(); };
+
+/* Double-tap on a node to edit (touch devices don't fire dblclick) */
+let lastTapTime = 0, lastTapId = null;
+worldEl.addEventListener('touchend', e=>{
+  const target = e.target.closest && e.target.closest('.node');
+  if(!target) return;
+  const now = Date.now();
+  const id = target.dataset.id;
+  if(id === lastTapId && (now - lastTapTime) < 350){
+    target.dispatchEvent(new Event('dblclick', {bubbles:true}));
+    lastTapTime = 0; lastTapId = null;
+  } else {
+    lastTapTime = now; lastTapId = id;
+  }
+});
+document.getElementById('btn-zoomin').onclick = ()=>{ zoomTo(scale*1.15, window.innerWidth/2, (window.innerHeight-56)/2+56); };
+document.getElementById('btn-zoomout').onclick = ()=>{ zoomTo(scale*0.87, window.innerWidth/2, (window.innerHeight-56)/2+56); };
+document.getElementById('btn-fit').onclick = ()=>{ scale=1; centerView(); };
 document.getElementById('btn-new').onclick = addRoot;
 document.getElementById('btn-delete').onclick = deleteSelected;
 window.addEventListener('keydown', e=>{
@@ -710,7 +798,8 @@ document.getElementById('modal-bg').addEventListener('click', e=>{
 /* ============ INIT ============ */
 try{
   loadLocal();
-  panX = window.innerWidth/2; panY = (window.innerHeight-56)/2+56;
+  saveLocal(); // persist immediately so a fresh default node/session isn't lost if the tab closes before any edit
+  centerView();
   render();
 }catch(e){
   console.error('Init failed:', e);
