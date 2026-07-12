@@ -567,40 +567,75 @@ document.getElementById('aikey').addEventListener('change', e=>{
 });
 // Uses Google's free Gemini API (Gemini 3 Flash) — no card required, generous free daily quota.
 // Get a key at https://aistudio.google.com/app/apikey
-async function callClaude(prompt, system){
+async function callClaude(prompt, system, jsonSchema){
   const key = document.getElementById('aikey').value.trim();
   if(!key){ toast('Add your free Gemini API key first'); return null; }
   setSync('busy','Thinking…');
   try{
+    const genConfig = { maxOutputTokens: 2048, temperature: 0.8 };
+    if(jsonSchema){
+      genConfig.responseMimeType = 'application/json';
+      genConfig.responseSchema = jsonSchema;
+    }
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(key)}`, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({
         contents:[{ role:'user', parts:[{ text: prompt }] }],
         systemInstruction:{ parts:[{ text: system }] },
-        generationConfig:{ maxOutputTokens: 1024, temperature: 0.8 }
+        generationConfig: genConfig
       })
     });
     const data = await res.json();
+    console.log('Gemini raw response:', data);
     if(data.error){ toast('AI error: '+data.error.message); setSync('ok',''); return null; }
+    if(data.promptFeedback && data.promptFeedback.blockReason){
+      toast('Blocked: '+data.promptFeedback.blockReason); setSync('ok',''); return null;
+    }
+    const cand = data.candidates && data.candidates[0];
+    if(!cand){ toast('No response from AI — try again'); setSync('ok',''); return null; }
+    if(cand.finishReason === 'MAX_TOKENS'){
+      toast('Response got cut off — try a shorter topic');
+    }
+    const parts = (cand.content && cand.content.parts) || [];
+    const text = parts.map(p=>p.text||'').join('');
+    console.log('Gemini extracted text:', text);
     setSync('ok','Synced');
-    const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
-    return parts.map(p=>p.text||'').join('');
-  }catch(e){ toast('AI request failed'); return null; }
+    return text;
+  }catch(e){ toast('AI request failed — check your key/connection'); setSync('err','AI request failed'); return null; }
 }
 function extractJSON(text){
-  const match = text.match(/\{[\s\S]*\}/);
+  if(!text) return null;
+  let cleaned = text.trim().replace(/^```json\s*/i,'').replace(/^```\s*/,'').replace(/```\s*$/,'');
+  try{ return JSON.parse(cleaned); }catch(e){}
+  const match = cleaned.match(/\{[\s\S]*\}/);
   if(!match) return null;
   try{ return JSON.parse(match[0]); }catch(e){ return null; }
 }
 document.getElementById('btn-ai-generate').onclick = async ()=>{
   const topic = document.getElementById('aiprompt').value.trim();
   if(!topic){ toast('Describe a topic first'); return; }
-  const sys = `You produce mind maps as strict JSON only, no prose, no markdown fences. Schema: {"root":"string","children":[{"text":"string","children":[{"text":"string"}]}]}. Give 4-6 top-level branches, each with 2-4 sub-points. Keep every text field under 6 words.`;
-  const out = await callClaude(`Topic: ${topic}`, sys);
+  const sys = `You produce mind maps. Give 4-6 top-level branches, each with 2-4 sub-points. Keep every text field under 6 words.`;
+  const schema = {
+    type:'OBJECT',
+    properties:{
+      root:{type:'STRING'},
+      children:{
+        type:'ARRAY',
+        items:{
+          type:'OBJECT',
+          properties:{
+            text:{type:'STRING'},
+            children:{ type:'ARRAY', items:{ type:'OBJECT', properties:{ text:{type:'STRING'} } } }
+          }
+        }
+      }
+    }
+  };
+  const out = await callClaude(`Topic: ${topic}`, sys, schema);
   if(!out) return;
   const parsed = extractJSON(out);
-  if(!parsed){ toast('Could not parse AI response'); return; }
+  if(!parsed){ toast('Could not parse AI response — try again'); return; }
   const rootId = uid();
   nodes[rootId] = {id:rootId, text:parsed.root||topic, x:0, y:0, color:'#8b7cff', parentId:null, collapsed:false};
   (parsed.children||[]).forEach((branch,i)=>{
@@ -616,11 +651,12 @@ document.getElementById('btn-ai-expand').onclick = async ()=>{
   if(!selectedId){ toast('Select a node to expand'); return; }
   const node = nodes[selectedId];
   const extra = document.getElementById('aiprompt').value.trim();
-  const sys = `You produce short lists as strict JSON only: {"ideas":["string","string",...]}. Give 3-5 concise sub-ideas (under 6 words each), no prose.`;
-  const out = await callClaude(`Parent idea: "${node.text}". ${extra ? 'Focus: '+extra : ''} Suggest sub-ideas.`, sys);
+  const sys = `You produce short lists of 3-5 concise sub-ideas (under 6 words each).`;
+  const schema = { type:'OBJECT', properties:{ ideas:{ type:'ARRAY', items:{type:'STRING'} } } };
+  const out = await callClaude(`Parent idea: "${node.text}". ${extra ? 'Focus: '+extra : ''} Suggest sub-ideas.`, sys, schema);
   if(!out) return;
   const parsed = extractJSON(out);
-  if(!parsed || !parsed.ideas){ toast('Could not parse AI response'); return; }
+  if(!parsed || !parsed.ideas){ toast('Could not parse AI response — try again'); return; }
   parsed.ideas.forEach(idea=> addChild(selectedId, idea));
   toast('Node expanded');
 };
