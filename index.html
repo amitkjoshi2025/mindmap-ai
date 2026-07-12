@@ -144,6 +144,7 @@
   <div id="syncstatus"><span class="sdot"></span><span id="syncstatus-text">Not connected</span></div>
   <button class="topbtn primary" id="btn-drive">Connect Google Drive</button>
   <button class="topbtn" id="btn-help">?</button>
+  <button class="topbtn" id="btn-reset-emergency" style="color:#ff7c7c;border-color:#ff7c7c33;" onclick="if(confirm('This clears all local mind map data on this device and reloads. Your Drive-saved file (if any) is not touched. Continue?')){ Object.keys(localStorage).filter(k=>k.startsWith('synapse_')).forEach(k=>localStorage.removeItem(k)); location.reload(); }">Reset app</button>
 </div>
 
 <div id="toolbar">
@@ -213,8 +214,19 @@ function setSync(state, text){
 function loadLocal(){
   try{
     const raw = localStorage.getItem('synapse_data');
-    if(raw){ nodes = JSON.parse(raw); }
-  }catch(e){ nodes = {}; }
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(parsed && typeof parsed === 'object' && !Array.isArray(parsed)){
+        nodes = parsed;
+      } else {
+        console.warn('Stored data was not a valid node map, resetting.');
+        nodes = {};
+      }
+    }
+  }catch(e){
+    console.error('Could not read stored data, resetting.', e);
+    nodes = {};
+  }
   if(Object.keys(nodes).length === 0){
     const id = uid();
     nodes[id] = {id, text:'New idea', x:0, y:0, color:'#8b7cff', parentId:null, collapsed:false};
@@ -228,45 +240,56 @@ function saveLocal(){
 
 /* ============ RENDER ============ */
 function render(){
-  worldEl.querySelectorAll('.node').forEach(n=>n.remove());
-  let edgePaths = '';
-  Object.values(nodes).forEach(n=>{
-    if(n.parentId && !isVisible(n.id)) return;
-    // edges
-    if(n.parentId && nodes[n.parentId]){
-      const p = nodes[n.parentId];
-      const x1=p.x+4000, y1=p.y+4000, x2=n.x+4000, y2=n.y+4000;
-      const mx = (x1+x2)/2;
-      edgePaths += `<path d="M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" stroke="${n.color||'#8b7cff'}" stroke-width="2" fill="none" opacity="0.55"/>`;
-    }
-    const div = document.createElement('div');
-    div.className = 'node' + (n.parentId? '' : ' root') + (n.id===selectedId? ' selected':'') + (hasChildren(n.id) ? ' has-children':'');
-    div.style.left = (n.x+4000)+'px';
-    div.style.top = (n.y+4000)+'px';
-    div.style.borderColor = n.color || '#232c47';
-    div.dataset.id = n.id;
-    div.contentEditable = false;
-    div.textContent = n.text;
+  try{
+    worldEl.querySelectorAll('.node').forEach(n=>n.remove());
+    let edgePaths = '';
+    Object.values(nodes).forEach(n=>{
+      try{
+        if(typeof n.x !== 'number') n.x = 0;
+        if(typeof n.y !== 'number') n.y = 0;
+        if(!n.text) n.text = 'Untitled';
+        if(n.parentId && !isVisible(n.id)) return;
+        if(n.parentId && nodes[n.parentId]){
+          const p = nodes[n.parentId];
+          const x1=p.x+4000, y1=p.y+4000, x2=n.x+4000, y2=n.y+4000;
+          const mx = (x1+x2)/2;
+          edgePaths += `<path d="M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" stroke="${n.color||'#8b7cff'}" stroke-width="2" fill="none" opacity="0.55"/>`;
+        }
+        const div = document.createElement('div');
+        div.className = 'node' + (n.parentId? '' : ' root') + (n.id===selectedId? ' selected':'') + (hasChildren(n.id) ? ' has-children':'');
+        div.style.left = (n.x+4000)+'px';
+        div.style.top = (n.y+4000)+'px';
+        div.style.borderColor = n.color || '#232c47';
+        div.dataset.id = n.id;
+        div.contentEditable = false;
+        div.textContent = n.text;
 
-    const handle = document.createElement('div');
-    handle.className = 'handle'; handle.textContent='+';
-    handle.title = 'Add child';
-    handle.onclick = (e)=>{ e.stopPropagation(); addChild(n.id); };
-    div.appendChild(handle);
+        const handle = document.createElement('div');
+        handle.className = 'handle'; handle.textContent='+';
+        handle.title = 'Add child';
+        handle.onclick = (e)=>{ e.stopPropagation(); addChild(n.id); };
+        div.appendChild(handle);
 
-    if(hasChildren(n.id)){
-      const cb = document.createElement('div');
-      cb.className = 'collapsebtn';
-      cb.textContent = n.collapsed ? '▸' : '▾';
-      cb.onclick = (e)=>{ e.stopPropagation(); n.collapsed = !n.collapsed; saveLocal(); render(); };
-      div.appendChild(cb);
-    }
+        if(hasChildren(n.id)){
+          const cb = document.createElement('div');
+          cb.className = 'collapsebtn';
+          cb.textContent = n.collapsed ? '▸' : '▾';
+          cb.onclick = (e)=>{ e.stopPropagation(); n.collapsed = !n.collapsed; saveLocal(); render(); };
+          div.appendChild(cb);
+        }
 
-    attachNodeEvents(div, n);
-    worldEl.appendChild(div);
-  });
-  edgesEl.innerHTML = edgePaths;
-  applyTransform();
+        attachNodeEvents(div, n);
+        worldEl.appendChild(div);
+      }catch(nodeErr){
+        console.error('Skipped a broken node:', n, nodeErr);
+      }
+    });
+    edgesEl.innerHTML = edgePaths;
+    applyTransform();
+  }catch(e){
+    console.error('Render failed:', e);
+    toast('Something went wrong rendering the map — try "Reset app" (top right) if this repeats');
+  }
 }
 function hasChildren(id){ return Object.values(nodes).some(n=>n.parentId===id); }
 function isVisible(id){
@@ -394,24 +417,31 @@ document.querySelectorAll('.toolbtn[data-color]').forEach(btn=>{
 
 /* ============ BACKGROUND PARTICLE FX ============ */
 (function(){
-  const cv = document.getElementById('bgfx');
-  const ctx = cv.getContext('2d');
-  let particles = [];
-  function resize(){ cv.width=innerWidth; cv.height=innerHeight; }
-  resize(); window.addEventListener('resize', resize);
-  for(let i=0;i<60;i++) particles.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,vx:(Math.random()-.5)*.15,vy:(Math.random()-.5)*.15,r:Math.random()*1.4+.4});
-  function loop(){
-    ctx.clearRect(0,0,cv.width,cv.height);
-    ctx.fillStyle='rgba(139,124,255,.55)';
-    particles.forEach(p=>{
-      p.x+=p.vx; p.y+=p.vy;
-      if(p.x<0)p.x=cv.width; if(p.x>cv.width)p.x=0;
-      if(p.y<0)p.y=cv.height; if(p.y>cv.height)p.y=0;
-      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill();
-    });
-    requestAnimationFrame(loop);
+  try{
+    const cv = document.getElementById('bgfx');
+    const ctx = cv.getContext('2d');
+    if(!ctx){ console.warn('Canvas 2D context unavailable — skipping background effect.'); return; }
+    let particles = [];
+    function resize(){ cv.width=innerWidth; cv.height=innerHeight; }
+    resize(); window.addEventListener('resize', resize);
+    for(let i=0;i<60;i++) particles.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,vx:(Math.random()-.5)*.15,vy:(Math.random()-.5)*.15,r:Math.random()*1.4+.4});
+    function loop(){
+      try{
+        ctx.clearRect(0,0,cv.width,cv.height);
+        ctx.fillStyle='rgba(139,124,255,.55)';
+        particles.forEach(p=>{
+          p.x+=p.vx; p.y+=p.vy;
+          if(p.x<0)p.x=cv.width; if(p.x>cv.width)p.x=0;
+          if(p.y<0)p.y=cv.height; if(p.y>cv.height)p.y=0;
+          ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill();
+        });
+      }catch(e){ return; } // stop quietly instead of crashing the app if anything goes wrong mid-animation
+      requestAnimationFrame(loop);
+    }
+    loop();
+  }catch(e){
+    console.warn('Background effect disabled:', e);
   }
-  loop();
 })();
 
 /* ============ EXPORT / IMPORT ============ */
@@ -678,13 +708,16 @@ document.getElementById('modal-bg').addEventListener('click', e=>{
 });
 
 /* ============ INIT ============ */
-loadLocal();
-panX = window.innerWidth/2; panY = (window.innerHeight-56)/2+56;
-render();
-if(getClientId()){
-  // auto attempt silent reconnect isn't reliable with GIS token flow; require explicit click.
+try{
+  loadLocal();
+  panX = window.innerWidth/2; panY = (window.innerHeight-56)/2+56;
+  render();
+}catch(e){
+  console.error('Init failed:', e);
+  document.getElementById('world').innerHTML = '';
+  toast('App failed to start — click "Reset app" (top right) to recover', 8000);
 }
-window.addEventListener('beforeunload', ()=> saveLocal());
+window.addEventListener('beforeunload', ()=> { try{ saveLocal(); }catch(e){} });
 
 })();
 </script>
