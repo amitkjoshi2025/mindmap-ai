@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Synapse — AI Mind Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root{
+    --bg: #0a0e1a;
+    --bg-soft: #0f1526;
+    --panel: #131a2e;
+    --line: #232c47;
+    --ink: #e8ecf7;
+    --ink-dim: #8992ad;
+    --violet: #8b7cff;
+    --cyan: #5ee7d0;
+    --coral: #ff7c7c;
+    --amber: #ffc76b;
+    --glow: 0 0 24px rgba(139,124,255,.35);
+    font-family: 'Space Grotesk', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overflow:hidden;font-family:'Space Grotesk',sans-serif;}
+  #bgfx{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;}
+
+  /* ---- Top bar ---- */
+  #topbar{
+    position:fixed;top:0;left:0;right:0;height:56px;z-index:20;
+    display:flex;align-items:center;gap:14px;padding:0 16px;
+    background:rgba(10,14,26,.85);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  #brand{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:.02em;font-size:16px;white-space:nowrap;}
+  #brand .dot{width:9px;height:9px;border-radius:50%;background:var(--violet);box-shadow:var(--glow);}
+  .divider{width:1px;height:24px;background:var(--line);}
+
+  .topbtn{
+    display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
+    color:var(--ink);padding:8px 12px;border-radius:8px;cursor:pointer;font-family:inherit;
+    font-size:13px;font-weight:500;transition:.15s;white-space:nowrap;
+  }
+  .topbtn:hover{border-color:var(--violet);color:var(--violet);}
+  .topbtn.primary{background:var(--violet);border-color:var(--violet);color:#0a0e1a;font-weight:600;}
+  .topbtn.primary:hover{filter:brightness(1.1);color:#0a0e1a;}
+  #syncstatus{font-size:12px;color:var(--ink-dim);font-family:'IBM Plex Mono',monospace;display:flex;align-items:center;gap:6px;}
+  #syncstatus .sdot{width:7px;height:7px;border-radius:50%;background:var(--ink-dim);}
+  #syncstatus.ok .sdot{background:var(--cyan);box-shadow:0 0 8px var(--cyan);}
+  #syncstatus.busy .sdot{background:var(--amber);animation:pulse 1s infinite;}
+  #syncstatus.err .sdot{background:var(--coral);}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  #spacer{flex:1;}
+
+  /* ---- Canvas ---- */
+  #canvas-wrap{position:absolute;inset:0;top:56px;overflow:hidden;cursor:grab;}
+  #canvas-wrap.panning{cursor:grabbing;}
+  #world{position:absolute;top:0;left:0;transform-origin:0 0;}
+  svg#edges{position:absolute;top:-4000px;left:-4000px;width:8000px;height:8000px;overflow:visible;pointer-events:none;}
+  .node{
+    position:absolute;min-width:64px;max-width:260px;padding:10px 16px;border-radius:14px;
+    background:var(--panel);border:1.5px solid var(--line);color:var(--ink);
+    font-size:14px;line-height:1.35;cursor:grab;user-select:none;
+    box-shadow:0 4px 18px rgba(0,0,0,.35);
+    transform:translate(-50%,-50%);
+  }
+  .node:hover{border-color:var(--violet);}
+  .node.selected{border-color:var(--violet);box-shadow:var(--glow);}
+  .node[contenteditable="true"]{cursor:text;}
+  .node.root{font-weight:700;font-size:16px;background:linear-gradient(135deg,#8b7cff22,#5ee7d022);border-color:var(--violet);}
+  .node .handle{
+    position:absolute;bottom:-9px;right:-9px;width:20px;height:20px;border-radius:50%;
+    background:var(--violet);color:#0a0e1a;font-size:14px;line-height:20px;text-align:center;
+    cursor:pointer;font-weight:700;opacity:0;transition:.15s;
+  }
+  .node:hover .handle{opacity:1;}
+  .node .collapsebtn{
+    position:absolute;top:-9px;left:-9px;width:18px;height:18px;border-radius:50%;
+    background:var(--bg-soft);border:1px solid var(--line);color:var(--ink-dim);font-size:10px;
+    line-height:16px;text-align:center;cursor:pointer;display:none;
+  }
+  .node.has-children .collapsebtn{display:block;}
+
+  /* ---- Left toolbar ---- */
+  #toolbar{
+    position:fixed;left:16px;top:76px;z-index:15;display:flex;flex-direction:column;gap:8px;
+  }
+  .toolbtn{
+    width:40px;height:40px;border-radius:10px;background:var(--panel);border:1px solid var(--line);
+    color:var(--ink-dim);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:17px;
+  }
+  .toolbtn:hover{color:var(--violet);border-color:var(--violet);}
+  .swatch{width:16px;height:16px;border-radius:50%;border:2px solid #0000;}
+
+  /* ---- AI panel ---- */
+  #aipanel{
+    position:fixed;right:16px;top:76px;width:320px;z-index:15;background:var(--panel);
+    border:1px solid var(--line);border-radius:14px;padding:14px;display:none;
+  }
+  #aipanel.open{display:block;}
+  #aipanel h3{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);}
+  #aipanel textarea{
+    width:100%;background:var(--bg-soft);border:1px solid var(--line);border-radius:8px;color:var(--ink);
+    padding:8px;font-family:inherit;font-size:13px;resize:vertical;min-height:60px;
+  }
+  #aipanel .row{display:flex;gap:8px;margin-top:8px;}
+  #aipanel .row .topbtn{flex:1;justify-content:center;}
+  #aikey{width:100%;background:var(--bg-soft);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:8px;font-size:12px;font-family:'IBM Plex Mono',monospace;margin-bottom:8px;}
+  #aihint{font-size:11px;color:var(--ink-dim);margin-top:8px;line-height:1.5;}
+
+  /* ---- Modal ---- */
+  #modal-bg{position:fixed;inset:0;background:rgba(6,8,16,.7);z-index:40;display:none;align-items:center;justify-content:center;}
+  #modal-bg.open{display:flex;}
+  #modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;max-width:480px;width:90%;max-height:80vh;overflow:auto;}
+  #modal h2{margin-top:0;font-size:18px;}
+  #modal p, #modal li{color:var(--ink-dim);font-size:13.5px;line-height:1.6;}
+  #modal code{background:var(--bg-soft);padding:2px 6px;border-radius:4px;color:var(--cyan);font-family:'IBM Plex Mono',monospace;font-size:12px;}
+  #modal ol{padding-left:18px;}
+  #modal .close{float:right;cursor:pointer;color:var(--ink-dim);font-size:20px;}
+
+  #toast{
+    position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel);
+    border:1px solid var(--violet);border-radius:10px;padding:10px 18px;font-size:13px;z-index:50;
+    opacity:0;pointer-events:none;transition:.25s;
+  }
+  #toast.show{opacity:1;}
+  ::selection{background:var(--violet);color:#0a0e1a;}
+</style>
+</head>
+<body>
+
+<canvas id="bgfx"></canvas>
+
+<div id="topbar">
+  <div id="brand"><span class="dot"></span>Synapse</div>
+  <div class="divider"></div>
+  <button class="topbtn" id="btn-new">+ Root</button>
+  <button class="topbtn" id="btn-ai">✦ AI Generate</button>
+  <button class="topbtn" id="btn-export">Export</button>
+  <button class="topbtn" id="btn-import">Import</button>
+  <div id="spacer"></div>
+  <div id="syncstatus"><span class="sdot"></span><span id="syncstatus-text">Not connected</span></div>
+  <button class="topbtn primary" id="btn-drive">Connect Google Drive</button>
+  <button class="topbtn" id="btn-help">?</button>
+</div>
+
+<div id="toolbar">
+  <div class="toolbtn" data-color="#8b7cff" title="Violet"><span class="swatch" style="background:#8b7cff"></span></div>
+  <div class="toolbtn" data-color="#5ee7d0" title="Cyan"><span class="swatch" style="background:#5ee7d0"></span></div>
+  <div class="toolbtn" data-color="#ff7c7c" title="Coral"><span class="swatch" style="background:#ff7c7c"></span></div>
+  <div class="toolbtn" data-color="#ffc76b" title="Amber"><span class="swatch" style="background:#ffc76b"></span></div>
+  <div class="toolbtn" id="btn-zoomin" title="Zoom in">+</div>
+  <div class="toolbtn" id="btn-zoomout" title="Zoom out">−</div>
+  <div class="toolbtn" id="btn-fit" title="Fit to screen">⤢</div>
+  <div class="toolbtn" id="btn-delete" title="Delete selected node">🗑</div>
+</div>
+
+<div id="aipanel">
+  <h3>AI Assist</h3>
+  <input id="aikey" type="password" placeholder="Your Anthropic API key (sk-ant-...)">
+  <textarea id="aiprompt" placeholder="e.g. 'Launch plan for a podcast about ocean science' or leave blank to expand the selected node"></textarea>
+  <div class="row">
+    <button class="topbtn primary" id="btn-ai-generate">Generate map</button>
+    <button class="topbtn" id="btn-ai-expand">Expand node</button>
+  </div>
+  <div id="aihint">Key is stored only in this browser (localStorage), never sent anywhere but Anthropic's API directly from your device.</div>
+</div>
+
+<div id="canvas-wrap">
+  <div id="world">
+    <svg id="edges"></svg>
+  </div>
+</div>
+
+<div id="modal-bg">
+  <div id="modal"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function(){
+
+/* ============ STATE ============ */
+let nodes = {};        // id -> {id,text,x,y,color,parentId,collapsed}
+let selectedId = null;
+let scale = 1, panX = 0, panY = 0;
+let driveFileId = localStorage.getItem('synapse_drive_fileid') || null;
+let driveToken = null;
+let tokenClient = null;
+const CLIENT_ID_KEY = 'synapse_google_client_id';
+
+const worldEl = document.getElementById('world');
+const wrapEl = document.getElementById('canvas-wrap');
+const edgesEl = document.getElementById('edges');
+
+/* ============ UTIL ============ */
+function uid(){ return 'n' + Math.random().toString(36).slice(2,10); }
+function toast(msg, ms=2400){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), ms);
+}
+function setSync(state, text){
+  const el = document.getElementById('syncstatus');
+  el.className = state;
+  document.getElementById('syncstatus-text').textContent = text;
+}
+
+/* ============ DATA MODEL ============ */
+function loadLocal(){
+  try{
+    const raw = localStorage.getItem('synapse_data');
+    if(raw){ nodes = JSON.parse(raw); }
+  }catch(e){ nodes = {}; }
+  if(Object.keys(nodes).length === 0){
+    const id = uid();
+    nodes[id] = {id, text:'New idea', x:0, y:0, color:'#8b7cff', parentId:null, collapsed:false};
+  }
+}
+function saveLocal(){
+  localStorage.setItem('synapse_data', JSON.stringify(nodes));
+  localStorage.setItem('synapse_updated', Date.now().toString());
+  scheduleDriveSave();
+}
+
+/* ============ RENDER ============ */
+function render(){
+  worldEl.querySelectorAll('.node').forEach(n=>n.remove());
+  let edgePaths = '';
+  Object.values(nodes).forEach(n=>{
+    if(n.parentId && !isVisible(n.id)) return;
+    // edges
+    if(n.parentId && nodes[n.parentId]){
+      const p = nodes[n.parentId];
+      const x1=p.x+4000, y1=p.y+4000, x2=n.x+4000, y2=n.y+4000;
+      const mx = (x1+x2)/2;
+      edgePaths += `<path d="M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" stroke="${n.color||'#8b7cff'}" stroke-width="2" fill="none" opacity="0.55"/>`;
+    }
+    const div = document.createElement('div');
+    div.className = 'node' + (n.parentId? '' : ' root') + (n.id===selectedId? ' selected':'') + (hasChildren(n.id) ? ' has-children':'');
+    div.style.left = (n.x+4000)+'px';
+    div.style.top = (n.y+4000)+'px';
+    div.style.borderColor = n.color || '#232c47';
+    div.dataset.id = n.id;
+    div.contentEditable = false;
+    div.textContent = n.text;
+
+    const handle = document.createElement('div');
+    handle.className = 'handle'; handle.textContent='+';
+    handle.title = 'Add child';
+    handle.onclick = (e)=>{ e.stopPropagation(); addChild(n.id); };
+    div.appendChild(handle);
+
+    if(hasChildren(n.id)){
+      const cb = document.createElement('div');
+      cb.className = 'collapsebtn';
+      cb.textContent = n.collapsed ? '▸' : '▾';
+      cb.onclick = (e)=>{ e.stopPropagation(); n.collapsed = !n.collapsed; saveLocal(); render(); };
+      div.appendChild(cb);
+    }
+
+    attachNodeEvents(div, n);
+    worldEl.appendChild(div);
+  });
+  edgesEl.innerHTML = edgePaths;
+  applyTransform();
+}
+function hasChildren(id){ return Object.values(nodes).some(n=>n.parentId===id); }
+function isVisible(id){
+  let n = nodes[id];
+  while(n && n.parentId){
+    const p = nodes[n.parentId];
+    if(p && p.collapsed) return false;
+    n = p;
+  }
+  return true;
+}
+function applyTransform(){
+  worldEl.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`;
+}
+
+/* ============ NODE INTERACTION ============ */
+function attachNodeEvents(div, n){
+  let dragging=false, sx=0, sy=0, ox=0, oy=0, moved=false;
+  div.addEventListener('mousedown', e=>{
+    e.stopPropagation();
+    selectedId = n.id; render();
+    if(div.isContentEditable) return;
+    dragging = true; moved=false;
+    sx=e.clientX; sy=e.clientY; ox=n.x; oy=n.y;
+    div.style.cursor='grabbing';
+  });
+  window.addEventListener('mousemove', e=>{
+    if(!dragging) return;
+    moved=true;
+    n.x = ox + (e.clientX-sx)/scale;
+    n.y = oy + (e.clientY-sy)/scale;
+    render();
+  });
+  window.addEventListener('mouseup', ()=>{
+    if(dragging && moved) saveLocal();
+    dragging=false;
+  });
+  div.addEventListener('dblclick', e=>{
+    e.stopPropagation();
+    div.contentEditable = true;
+    div.focus();
+    document.execCommand('selectAll', false, null);
+  });
+  div.addEventListener('blur', ()=>{
+    if(div.isContentEditable){
+      div.contentEditable = false;
+      n.text = div.textContent.trim() || 'Untitled';
+      saveLocal(); render();
+    }
+  });
+  div.addEventListener('keydown', e=>{
+    if(e.key==='Enter' && div.isContentEditable){ e.preventDefault(); div.blur(); }
+  });
+}
+function addChild(parentId, text){
+  const p = nodes[parentId];
+  const id = uid();
+  const siblings = Object.values(nodes).filter(n=>n.parentId===parentId);
+  const angle = (siblings.length * 47) % 360;
+  const rad = angle * Math.PI/180;
+  nodes[id] = {
+    id, text: text || 'New idea', parentId,
+    x: p.x + Math.cos(rad)*160, y: p.y + Math.sin(rad)*140,
+    color: p.color || '#8b7cff', collapsed:false
+  };
+  p.collapsed = false;
+  selectedId = id;
+  saveLocal(); render();
+  return id;
+}
+function addRoot(){
+  const id = uid();
+  nodes[id] = {id, text:'New root', x: (Math.random()-.5)*200, y:(Math.random()-.5)*200, color:'#8b7cff', parentId:null, collapsed:false};
+  selectedId = id; saveLocal(); render();
+}
+function deleteSelected(){
+  if(!selectedId) return;
+  const toDelete = [selectedId];
+  const collect = (id)=>{ Object.values(nodes).forEach(n=>{ if(n.parentId===id){ toDelete.push(n.id); collect(n.id); } }); };
+  collect(selectedId);
+  toDelete.forEach(id=>delete nodes[id]);
+  selectedId = null;
+  saveLocal(); render();
+}
+
+/* ============ CANVAS PAN/ZOOM ============ */
+(function(){
+  let panning=false, sx=0, sy=0, ox=0, oy=0;
+  wrapEl.addEventListener('mousedown', e=>{
+    if(e.target !== wrapEl && e.target.id !== 'world' && e.target.tagName!=='svg') return;
+    panning=true; sx=e.clientX; sy=e.clientY; ox=panX; oy=panY;
+    wrapEl.classList.add('panning');
+    selectedId=null; render();
+  });
+  window.addEventListener('mousemove', e=>{
+    if(!panning) return;
+    panX = ox + (e.clientX-sx);
+    panY = oy + (e.clientY-sy);
+    applyTransform();
+  });
+  window.addEventListener('mouseup', ()=>{ panning=false; wrapEl.classList.remove('panning'); });
+  wrapEl.addEventListener('wheel', e=>{
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    scale = Math.min(2.5, Math.max(0.25, scale*delta));
+    applyTransform();
+  }, {passive:false});
+})();
+document.getElementById('btn-zoomin').onclick = ()=>{ scale=Math.min(2.5,scale*1.15); applyTransform(); };
+document.getElementById('btn-zoomout').onclick = ()=>{ scale=Math.max(0.25,scale*0.87); applyTransform(); };
+document.getElementById('btn-fit').onclick = ()=>{ scale=1; panX=window.innerWidth/2; panY=(window.innerHeight-56)/2+56; applyTransform(); };
+document.getElementById('btn-new').onclick = addRoot;
+document.getElementById('btn-delete').onclick = deleteSelected;
+window.addEventListener('keydown', e=>{
+  if((e.key==='Delete'||e.key==='Backspace') && selectedId && document.activeElement.tagName!=='DIV'){}
+  if((e.key==='Delete') && selectedId && !document.activeElement.isContentEditable){ deleteSelected(); }
+});
+document.querySelectorAll('.toolbtn[data-color]').forEach(btn=>{
+  btn.onclick = ()=>{
+    if(!selectedId) { toast('Select a node first'); return; }
+    nodes[selectedId].color = btn.dataset.color;
+    saveLocal(); render();
+  };
+});
+
+/* ============ BACKGROUND PARTICLE FX ============ */
+(function(){
+  const cv = document.getElementById('bgfx');
+  const ctx = cv.getContext('2d');
+  let particles = [];
+  function resize(){ cv.width=innerWidth; cv.height=innerHeight; }
+  resize(); window.addEventListener('resize', resize);
+  for(let i=0;i<60;i++) particles.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,vx:(Math.random()-.5)*.15,vy:(Math.random()-.5)*.15,r:Math.random()*1.4+.4});
+  function loop(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    ctx.fillStyle='rgba(139,124,255,.55)';
+    particles.forEach(p=>{
+      p.x+=p.vx; p.y+=p.vy;
+      if(p.x<0)p.x=cv.width; if(p.x>cv.width)p.x=0;
+      if(p.y<0)p.y=cv.height; if(p.y>cv.height)p.y=0;
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill();
+    });
+    requestAnimationFrame(loop);
+  }
+  loop();
+})();
+
+/* ============ EXPORT / IMPORT ============ */
+document.getElementById('btn-export').onclick = ()=>{
+  const blob = new Blob([JSON.stringify(nodes,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'mindmap-'+Date.now()+'.json';
+  a.click();
+};
+document.getElementById('btn-import').onclick = ()=>{
+  const inp = document.createElement('input');
+  inp.type='file'; inp.accept='application/json';
+  inp.onchange = ()=>{
+    const f = inp.files[0]; if(!f) return;
+    const r = new FileReader();
+    r.onload = ()=>{
+      try{ nodes = JSON.parse(r.result); selectedId=null; saveLocal(); render(); toast('Imported'); }
+      catch(e){ toast('Invalid file'); }
+    };
+    r.readAsText(f);
+  };
+  inp.click();
+};
+
+/* ============ GOOGLE DRIVE SYNC ============ */
+// Uses drive.file scope: app can only see/edit files it creates. Free, no cloud storage purchase needed —
+// it uses the user's own existing Google Drive quota.
+let saveTimer = null;
+function scheduleDriveSave(){
+  if(!driveToken) return;
+  clearTimeout(saveTimer);
+  setSync('busy','Syncing…');
+  saveTimer = setTimeout(driveSave, 1500);
+}
+function getClientId(){
+  return localStorage.getItem(CLIENT_ID_KEY) || '';
+}
+function ensureClientId(cb){
+  let id = getClientId();
+  if(id){ cb(id); return; }
+  showClientIdModal(cb);
+}
+function showClientIdModal(cb){
+  const modal = document.getElementById('modal');
+  modal.innerHTML = `
+    <span class="close" onclick="document.getElementById('modal-bg').classList.remove('open')">&times;</span>
+    <h2>Connect Google Drive (one-time setup)</h2>
+    <p>Synapse syncs using <b>your own free Google Drive</b> — no paid storage needed. You just need a free Google OAuth Client ID (takes ~2 minutes, one time only):</p>
+    <ol>
+      <li>Go to <code>console.cloud.google.com</code> → create a project (free)</li>
+      <li>APIs &amp; Services → OAuth consent screen → set to "External", add your email as test user</li>
+      <li>APIs &amp; Services → Credentials → Create Credentials → OAuth Client ID → type "Web application"</li>
+      <li>Under "Authorized JavaScript origins" add the URL you're opening this app from (e.g. <code>http://localhost:8080</code> or your GitHub Pages URL)</li>
+      <li>Copy the Client ID and paste it below</li>
+    </ol>
+    <input id="clientidinput" placeholder="xxxx.apps.googleusercontent.com" style="width:100%;padding:8px;border-radius:8px;background:var(--bg-soft);border:1px solid var(--line);color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:8px;">
+    <div class="row" style="margin-top:12px;display:flex;gap:8px;">
+      <button class="topbtn primary" id="saveclientid" style="flex:1;">Save & Connect</button>
+    </div>
+  `;
+  document.getElementById('modal-bg').classList.add('open');
+  document.getElementById('saveclientid').onclick = ()=>{
+    const val = document.getElementById('clientidinput').value.trim();
+    if(!val){ toast('Enter a client ID'); return; }
+    localStorage.setItem(CLIENT_ID_KEY, val);
+    document.getElementById('modal-bg').classList.remove('open');
+    cb(val);
+  };
+}
+function driveConnect(){
+  ensureClientId((clientId)=>{
+    if(typeof google === 'undefined'){ toast('Google script not loaded yet, try again in a moment'); return; }
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: 'https://www.googleapis.com/auth/drive.file',
+      callback: (resp)=>{
+        if(resp.error){ setSync('err','Auth failed'); return; }
+        driveToken = resp.access_token;
+        setSync('ok','Connected');
+        document.getElementById('btn-drive').textContent = 'Drive Connected';
+        driveLoad();
+      }
+    });
+    tokenClient.requestAccessToken();
+  });
+}
+async function driveFind(){
+  const res = await fetch("https://www.googleapis.com/drive/v3/files?q=name%3D'synapse-mindmap.json'&spaces=drive&fields=files(id,modifiedTime)", {
+    headers:{ Authorization: 'Bearer '+driveToken }
+  });
+  const data = await res.json();
+  return (data.files && data.files[0]) || null;
+}
+async function driveLoad(){
+  setSync('busy','Checking Drive…');
+  try{
+    let file = driveFileId ? {id:driveFileId} : await driveFind();
+    if(!file){ setSync('ok','No file yet — will create on first save'); return; }
+    driveFileId = file.id;
+    localStorage.setItem('synapse_drive_fileid', driveFileId);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`, {
+      headers:{ Authorization: 'Bearer '+driveToken }
+    });
+    if(res.ok){
+      const remote = await res.json();
+      const localTime = parseInt(localStorage.getItem('synapse_updated')||'0');
+      const remoteTime = remote.__updated || 0;
+      if(remoteTime > localTime){
+        nodes = remote.data || remote;
+        render();
+        toast('Loaded latest from Drive');
+      }
+    }
+    setSync('ok','Synced');
+  }catch(e){ setSync('err','Load failed'); }
+}
+async function driveSave(){
+  if(!driveToken) return;
+  const payload = JSON.stringify({ __updated: Date.now(), data: nodes });
+  try{
+    if(!driveFileId){
+      const metadata = { name:'synapse-mindmap.json', mimeType:'application/json' };
+      const boundary = 'synapse_boundary';
+      const body = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${payload}\r\n--${boundary}--`;
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method:'POST',
+        headers:{ Authorization:'Bearer '+driveToken, 'Content-Type':`multipart/related; boundary=${boundary}` },
+        body
+      });
+      const data = await res.json();
+      driveFileId = data.id;
+      localStorage.setItem('synapse_drive_fileid', driveFileId);
+    } else {
+      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=media`, {
+        method:'PATCH',
+        headers:{ Authorization:'Bearer '+driveToken, 'Content-Type':'application/json' },
+        body: payload
+      });
+    }
+    setSync('ok','Synced just now');
+  }catch(e){ setSync('err','Sync failed — will retry'); }
+}
+document.getElementById('btn-drive').onclick = driveConnect;
+
+/* ============ AI ASSIST ============ */
+document.getElementById('btn-ai').onclick = ()=>{
+  document.getElementById('aipanel').classList.toggle('open');
+};
+document.getElementById('aikey').value = localStorage.getItem('synapse_ai_key') || '';
+document.getElementById('aikey').addEventListener('change', e=>{
+  localStorage.setItem('synapse_ai_key', e.target.value.trim());
+});
+async function callClaude(prompt, system){
+  const key = document.getElementById('aikey').value.trim();
+  if(!key){ toast('Add your Anthropic API key first'); return null; }
+  setSync('busy','Thinking…');
+  try{
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': key,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: system,
+        messages:[{role:'user', content: prompt}]
+      })
+    });
+    const data = await res.json();
+    if(data.error){ toast('AI error: '+data.error.message); setSync('ok',''); return null; }
+    setSync('ok','Synced');
+    return data.content.map(c=>c.text||'').join('');
+  }catch(e){ toast('AI request failed'); return null; }
+}
+function extractJSON(text){
+  const match = text.match(/\{[\s\S]*\}/);
+  if(!match) return null;
+  try{ return JSON.parse(match[0]); }catch(e){ return null; }
+}
+document.getElementById('btn-ai-generate').onclick = async ()=>{
+  const topic = document.getElementById('aiprompt').value.trim();
+  if(!topic){ toast('Describe a topic first'); return; }
+  const sys = `You produce mind maps as strict JSON only, no prose, no markdown fences. Schema: {"root":"string","children":[{"text":"string","children":[{"text":"string"}]}]}. Give 4-6 top-level branches, each with 2-4 sub-points. Keep every text field under 6 words.`;
+  const out = await callClaude(`Topic: ${topic}`, sys);
+  if(!out) return;
+  const parsed = extractJSON(out);
+  if(!parsed){ toast('Could not parse AI response'); return; }
+  const rootId = uid();
+  nodes[rootId] = {id:rootId, text:parsed.root||topic, x:0, y:0, color:'#8b7cff', parentId:null, collapsed:false};
+  (parsed.children||[]).forEach((branch,i)=>{
+    const bid = addChild(rootId, branch.text);
+    nodes[bid].color = ['#8b7cff','#5ee7d0','#ff7c7c','#ffc76b'][i%4];
+    (branch.children||[]).forEach(leaf=> addChild(bid, leaf.text));
+  });
+  selectedId = rootId;
+  saveLocal(); render();
+  toast('Mind map generated');
+};
+document.getElementById('btn-ai-expand').onclick = async ()=>{
+  if(!selectedId){ toast('Select a node to expand'); return; }
+  const node = nodes[selectedId];
+  const extra = document.getElementById('aiprompt').value.trim();
+  const sys = `You produce short lists as strict JSON only: {"ideas":["string","string",...]}. Give 3-5 concise sub-ideas (under 6 words each), no prose.`;
+  const out = await callClaude(`Parent idea: "${node.text}". ${extra ? 'Focus: '+extra : ''} Suggest sub-ideas.`, sys);
+  if(!out) return;
+  const parsed = extractJSON(out);
+  if(!parsed || !parsed.ideas){ toast('Could not parse AI response'); return; }
+  parsed.ideas.forEach(idea=> addChild(selectedId, idea));
+  toast('Node expanded');
+};
+
+/* ============ HELP MODAL ============ */
+document.getElementById('btn-help').onclick = ()=>{
+  document.getElementById('modal').innerHTML = `
+    <span class="close" onclick="document.getElementById('modal-bg').classList.remove('open')">&times;</span>
+    <h2>How Synapse works</h2>
+    <p><b>Mapping:</b> Double-click a node to edit. Hover a node → click the ⊕ to add a child. Drag the canvas to pan, scroll to zoom, click a color swatch to recolor the selected node.</p>
+    <p><b>AI:</b> Open "AI Generate", paste your own Anthropic API key (stored only in this browser), describe a topic, and get a full branching map. Select any node and hit "Expand node" to grow it further.</p>
+    <p><b>Sync:</b> "Connect Google Drive" links your own free Drive storage (not a paid Anthropic/Synapse cloud) — the app can only touch the one file it creates, nothing else in your Drive. Every device that opens this same file and connects the same Google account will stay in sync.</p>
+    <p><b>Offline:</b> Everything also saves to this browser automatically, so it still works without Drive connected — sync just catches up next time you're online.</p>
+  `;
+  document.getElementById('modal-bg').classList.add('open');
+};
+document.getElementById('modal-bg').addEventListener('click', e=>{
+  if(e.target.id==='modal-bg') e.target.classList.remove('open');
+});
+
+/* ============ INIT ============ */
+loadLocal();
+panX = window.innerWidth/2; panY = (window.innerHeight-56)/2+56;
+render();
+if(getClientId()){
+  // auto attempt silent reconnect isn't reliable with GIS token flow; require explicit click.
+}
+window.addEventListener('beforeunload', ()=> saveLocal());
+
+})();
+</script>
+</body>
+</html>
